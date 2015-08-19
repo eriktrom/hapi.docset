@@ -4,57 +4,39 @@ var fs = require('fs');
 var sqlite3 = require('sqlite3');
 var _ = require('lodash');
 var mkdirp = require('mkdirp');
-var docsetName = 'hapi.docset';
-var referenceUrl = 'https://raw.githubusercontent.com/hapijs/hapi/master/API.md';
+var docsetName = 'joi.docset';
+var referenceUrl = 'https://raw.githubusercontent.com/hapijs/joi/master/README.md';
 var Path = require('path');
 
 var documentsPath = Path.join(__dirname, './' + docsetName + '/Contents/Resources/Documents/');
-mkdirp(documentsPath, function (err) {});
-
 var dbFile = Path.join(__dirname, './' + docsetName + '/Contents/Resources/docSet.dsidx');
-fs.unlink(dbFile, function(error) {
-    if (!error) {
-        console.log('Previous database deleted!');
-    };
-});
-
-var db = new sqlite3.Database(dbFile);
-db.serialize(function () {
-    db.run("CREATE TABLE searchIndex(id INTEGER PRIMARY KEY, name TEXT, type TEXT, path TEXT);");
-    db.run("CREATE UNIQUE INDEX anchor ON searchIndex (name, type, path);");
-});
-
-var hapiVersion = "NO-VERSION";
-
+var db; 
 
 var prepareIndexEntry = function (method, anchor) {
     var type = 'Guide';
 
-    if (/^(?:server).[a-z]/g.test(method)) {
+    if (/^(?:Hapi|plugin).[a-z]/g.test(method)) {
         type = 'Property';
     } else if (/^Hapi.[A-Z]/g.test(method)) {
         type = 'Constructor';
-    } else if (method === 'Server') {
-        type = 'Object';
     }
 
     if (method.indexOf('(') !== -1) {
         type = 'Method';
-
-        if (method.indexOf('prepareValue') === 0) {
-            method = 'Hapi.state.' + method;
-            type = 'Method';
-        } else if (method.indexOf('module.exports') === 0) {
-            type = 'Plugin';
+        var indexOf = method.indexOf('.');
+        if (indexOf !== -1) {
+            method = 'Joi.' + method.substr(0, indexOf) + '()' + method.substr(indexOf);
+        } else {
+            method = 'Joi.' + method;
         }
+    } else if (/^[a-z]*$/g.test(method)) {
+        method = 'Joi.'+method+'()';
+        type = 'Constructor';
     }
+
 
     if (method.indexOf('new ') === 0) {
         type = 'Constructor';
-        method = method.substr(4);
-    } else if (method.indexOf('Interface') !== -1) {
-        type = 'Interface';
-        method = 'Plugin';
     }
 
     return {
@@ -83,14 +65,9 @@ var fetchRawMarkdown = function (url) {
     });
 };
 
-var echoVersion = function (markdown) {
+var removeHeader = function (markdown) {
     return Q.Promise(function (resolve) {
-        var versionMatcher = /^# ([\d\.xX]*)/g;
-        var match = versionMatcher.exec(markdown);
-        if (match) {
-            console.log('Hapi version: '+match[1]);
-            hapiVersion = match[1];
-        }
+        markdown = "# Joi Reference" + markdown.split('<img src="https://raw.github.com/hapijs/joi/master/images/validation.png" align="right" />')[1];
         resolve(markdown);
     });
 };
@@ -193,16 +170,34 @@ var writeFile = function (text) {
     });
 };
 
-fetchRawMarkdown(referenceUrl)
-    .then(echoVersion)
-    .then(createSearchIndex)
-    .then(generateHtml)
-    .then(replaceUserContent)
-    .then(addDashAnchors)
-    .then(wrapInDocument)
-    .then(writeFile)
-    .then(function (markdown) {
-        console.log('Generation of hapi.docset version '+hapiVersion+' completed!');
-    }).catch(function (e) {
-        console.log(e);
+
+
+
+mkdirp(documentsPath, function (err) {
+    fs.unlink(dbFile, function(error) {
+        if (!error) {
+            console.log('Previous database deleted!');
+        };
+
+        db = new sqlite3.Database(dbFile); 
+        db.serialize(function () {
+            db.run("CREATE TABLE searchIndex(id INTEGER PRIMARY KEY, name TEXT, type TEXT, path TEXT);");
+            db.run("CREATE UNIQUE INDEX anchor ON searchIndex (name, type, path);");
+
+
+            fetchRawMarkdown(referenceUrl)
+                .then(removeHeader)
+                .then(createSearchIndex)
+                .then(generateHtml)
+                .then(replaceUserContent)
+                .then(addDashAnchors)
+                .then(wrapInDocument)
+                .then(writeFile)
+                .then(function (markdown) {
+                    console.log('Generation completed!');
+                }).catch(function (e) {
+                    console.log(e);
+                });
+        });
     });
+});
